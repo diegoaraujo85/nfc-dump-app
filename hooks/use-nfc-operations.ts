@@ -1,5 +1,11 @@
 import { useCallback, useState } from "react";
 import NfcManager, { NfcTech } from "react-native-nfc-manager";
+import { isSafeBlock } from "@/utils/mifareSafety";
+import {
+  authenticateBlock,
+  readBlock,
+  MIFARE_KEY_TYPE_A,
+} from "@/lib/mifareClassic";
 
 const NFC_AVAILABLE = !!NfcManager;
 
@@ -176,5 +182,88 @@ export function useNFCOperations() {
     writeTag,
     cancelOperation,
     cleanup,
+  };
+}
+
+
+
+
+
+const DEFAULT_KEY_A = [255, 255, 255, 255, 255, 255];
+
+export type CardTestResult = {
+  testedBlocks: {
+    block: number;
+    status: "SKIPPED" | "OK" | "ERROR";
+  }[];
+};
+
+export async function testCard(numBlocks: number): Promise<CardTestResult> {
+  const result: CardTestResult = { testedBlocks: [] };
+
+  await NfcManager.requestTechnology(NfcTech.MifareClassic);
+
+  for (let block = 0; block < numBlocks; block++) {
+    if (!isSafeBlock(block)) {
+      result.testedBlocks.push({ block, status: "SKIPPED" });
+      continue;
+    }
+
+    try {
+      await authenticateBlock(block, MIFARE_KEY_TYPE_A, DEFAULT_KEY_A);
+      await readBlock(block);
+
+      result.testedBlocks.push({ block, status: "OK" });
+    } catch {
+      result.testedBlocks.push({ block, status: "ERROR" });
+    }
+  }
+
+  await NfcManager.cancelTechnologyRequest();
+  return result;
+}
+
+export type CardCompatibility = {
+  ok: boolean;
+  authenticatedSectors: number;
+  reason?: string;
+};
+
+export async function checkCardCompatibility(
+  expectedBlocks: number
+): Promise<CardCompatibility> {
+  await NfcManager.requestTechnology(NfcTech.MifareClassic);
+
+  let authenticatedSectors = 0;
+
+  try {
+    // tenta autenticar um bloco por setor
+    const sectors = Math.ceil(expectedBlocks / 4);
+
+    for (let sector = 0; sector < sectors; sector++) {
+      const block = sector * 4;
+
+      try {
+        await authenticateBlock(block, MIFARE_KEY_TYPE_A, DEFAULT_KEY_A);
+        authenticatedSectors++;
+      } catch {
+        // setor não autenticável → ignora
+      }
+    }
+  } finally {
+    await NfcManager.cancelTechnologyRequest();
+  }
+
+  if (authenticatedSectors === 0) {
+    return {
+      ok: false,
+      authenticatedSectors: 0,
+      reason: "Nenhum setor autenticável com Key A padrão",
+    };
+  }
+
+  return {
+    ok: true,
+    authenticatedSectors,
   };
 }

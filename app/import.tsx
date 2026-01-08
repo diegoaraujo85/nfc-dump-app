@@ -1,189 +1,246 @@
+import { checkCardCompatibility, testCard } from "@/hooks/use-nfc-operations";
+import { analyzeDump } from "@/utils/analyzeDump";
+import React, { useEffect, useState } from "react";
 import {
   ScrollView,
   Text,
-  View,
   TouchableOpacity,
-  Alert,
-  ActivityIndicator,
+  View
 } from "react-native";
-import { useRouter } from "expo-router";
-import { ScreenContainer } from "@/components/screen-container";
-import { useNFCDumps } from "@/hooks/use-nfc-dumps";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
-import { useState } from "react";
-import { base64ToHex, cn } from "@/lib/utils";
+import { checkDumpCompatibility } from "@/utils/checkDumpCompatibility";
+
 
 export default function ImportScreen() {
-  const router = useRouter();
-  const { saveDump } = useNFCDumps();
-  const [selectedFile, setSelectedFile] = useState<{
-    name: string;
-    size: number;
-    uri: string;
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  const navigateTo = (path: string) => {
-    router.push(path as any);
-  };
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [dumpHex, setDumpHex] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<any>(null);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [testing, setTesting] = useState(false);
+  const [dumpCompatibility, setDumpCompatibility] = useState<any>(null);
+  const [cardCompatibility, setCardCompatibility] = useState<any>(null);
 
-  const pickFile = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: "*/*",
-      });
 
-      if (!result.canceled && result.assets.length > 0) {
-        const asset = result.assets[0];
-        setSelectedFile({
-          name: asset.name,
-          size: asset.size || 0,
-          uri: asset.uri,
-        });
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to pick file");
-      console.error(error);
-    }
-  };
-
-  const importDump = async () => {
-    if (!selectedFile) {
-      Alert.alert("Error", "No file selected");
+  useEffect(() => {
+    if (!dumpHex) {
+      setAnalysis(null);
+      setTestResult(null);
+      setFileName(null); 
       return;
     }
 
+    const result = analyzeDump(dumpHex);    
+    setAnalysis(result);
+  }, [dumpHex]);
+
+  useEffect(() => {
+    if (!dumpHex) return;
+
+    setDumpCompatibility(checkDumpCompatibility(dumpHex));
+  }, [dumpHex]);
+
+
+
+  // Simulação: dumpHex já foi carregado
+  // setDumpHex(hex)
+
+  const runTest = async () => {
+    if (testing) return; // 🔒 bloqueia duplo clique
+
+    setTesting(true);
     try {
-      setLoading(true);
-
-      // Read file as base64
-      const content = await FileSystem.readAsStringAsync(selectedFile.uri, {
-        encoding: "base64",
-      });
-
-      // Convert base64 to hex
-      const hexData = base64ToHex(content);
-
-      // Save dump
-      const dump = await saveDump(selectedFile.name, hexData);
-
-      if (dump) {
-        Alert.alert("Success", "Dump imported successfully", [
-          {
-            text: "View Details",
-            onPress: () => navigateTo(`/(tabs)/dump/${dump.id}`),
-          },
-          {
-            text: "Back to Home",
-            onPress: () => navigateTo("/(tabs)"),
-          },
-        ]);
-      } else {
-        Alert.alert("Error", "Failed to save dump");
-      }
-    } catch (error) {
-      Alert.alert(
-        "Error",
-        `Failed to import dump: ${error instanceof Error ? error.message : "Unknown error"}`
-      );
-      console.error(error);
+      const result = await testCard(analysis.totalBlocks);
+      setTestResult(result);
+    } catch (err) {
+      console.error("Erro no teste NFC:", err);
     } finally {
-      setLoading(false);
+      setTesting(false);
     }
   };
 
+  const handleImport = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled) return;
+
+    const file = result.assets[0];
+    setFileName(file.name);
+
+    const base64 = await FileSystem.readAsStringAsync(file.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    const hex = base64
+      .split("")
+      .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase();
+
+    setDumpHex(hex); // 🔥 ÚNICO ponto que dispara a análise
+  };
+
+  const canWrite =
+  dumpCompatibility?.ok &&
+  cardCompatibility?.ok &&
+  testResult &&
+  !testResult.testedBlocks.some((b: any) => b.status === "ERROR");
+
   return (
-    <ScreenContainer className="p-6">
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }}>
-        <View className="flex-1 gap-6">
-          {/* Header */}
-          <View className="items-center gap-2">
-            <Text className="text-3xl font-bold text-foreground">
-              Import Dump
+    <ScrollView contentContainerStyle={{ padding: 16 }}>
+      <TouchableOpacity
+        onPress={async () => {
+          const result = await checkCardCompatibility(
+            dumpCompatibility.totalBlocks
+          );
+          setCardCompatibility(result);
+        }}
+        style={{
+          marginTop: 16,
+          padding: 14,
+          backgroundColor: "#0ea5e9",
+        }}
+      >
+        <Text style={{ color: "#fff", textAlign: "center" }}>
+          🔍 VERIFICAR COMPATIBILIDADE DO CARTÃO
+        </Text>
+      </TouchableOpacity>
+
+      {cardCompatibility && (
+        <View style={{ marginTop: 16, padding: 12, borderWidth: 1 }}>
+          <Text style={{ fontWeight: "bold" }}>📋 Compatibilidade</Text>
+
+          {cardCompatibility.ok ? (
+            <Text style={{ color: "green", marginTop: 8 }}>
+              ✅ Cartão compatível ({cardCompatibility.authenticatedSectors} setores autenticáveis)
             </Text>
-            <Text className="text-base text-muted text-center">
-              Select a binary dump file to import
+          ) : (
+            <Text style={{ color: "red", marginTop: 8 }}>
+              ❌ Cartão incompatível: {cardCompatibility.reason}
             </Text>
-          </View>
-
-          {/* File Picker Section */}
-          <View className="gap-4">
-            <TouchableOpacity
-              onPress={pickFile}
-              disabled={loading}
-              className={cn(
-                "w-full bg-primary rounded-xl p-6 active:opacity-80",
-                loading && "opacity-50"
-              )}
-            >
-              <Text className="text-white font-semibold text-center text-lg">
-                {loading ? "Processing..." : "Select File"}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Selected File Info */}
-            {selectedFile && (
-              <View className="bg-surface rounded-xl p-4 border border-border">
-                <Text className="text-sm text-muted mb-2">Selected File</Text>
-                <Text className="text-lg font-semibold text-foreground mb-1">
-                  {selectedFile.name}
-                </Text>
-                <Text className="text-sm text-muted">
-                  {(selectedFile.size / 1024).toFixed(2)} KB
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Import Button */}
-          {selectedFile && (
-            <TouchableOpacity
-              onPress={importDump}
-              disabled={loading}
-              className={cn(
-                "w-full bg-success rounded-xl p-4 active:opacity-80",
-                loading && "opacity-50"
-              )}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text className="text-white font-semibold text-center text-lg">
-                  Import Dump
-                </Text>
-              )}
-            </TouchableOpacity>
           )}
+        </View>
+      )}
 
-          {/* Info Section */}
-          <View className="bg-surface rounded-xl p-4 border border-border">
-            <Text className="text-sm font-semibold text-foreground mb-2">
-              Supported Formats:
-            </Text>
-            <Text className="text-xs text-muted leading-relaxed">
-              • Binary files (.bin){"\n"}
-              • Hex files (.hex){"\n"}
-              • Raw data files{"\n"}
-              • Any binary format
-            </Text>
-          </View>
 
-          {/* Cancel Button */}
+      {!dumpHex && (
+        <View style={{ marginTop: 32 }}>
+          <Text style={{ fontSize: 18, fontWeight: "bold" }}>
+            📥 Importar Dump NFC
+          </Text>
+
+          <Text style={{ marginTop: 8, color: "#6b7280" }}>
+            Nenhum dump carregado ainda.
+          </Text>
+
           <TouchableOpacity
-            onPress={() => navigateTo("/(tabs)")}
-            disabled={loading}
-            className={cn(
-              "w-full bg-surface border border-border rounded-xl p-4 active:opacity-80",
-              loading && "opacity-50"
-            )}
+            onPress={handleImport}
+            style={{
+              marginTop: 16,
+              padding: 14,
+              backgroundColor: "#2563eb",
+            }}
           >
-            <Text className="text-foreground font-semibold text-center text-lg">
-              Cancel
+            <Text style={{ color: "#fff", textAlign: "center" }}>
+              📂 IMPORTAR DUMP
             </Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
-    </ScreenContainer>
+      )}
+
+      {fileName && (
+        <View style={{ marginTop: 16 }}>
+          <Text style={{ fontWeight: "bold" }}>📄 Arquivo carregado</Text>
+          <Text style={{ color: "#374151" }}>{fileName}</Text>
+        </View>
+      )}
+
+
+      {/* ANÁLISE OFFLINE */}
+      {analysis && (
+        <View style={{ marginTop: 16, padding: 12, borderWidth: 1 }}>
+          <Text style={{ fontWeight: "bold" }}>📊 Análise do Dump</Text>
+          <Text>Blocos totais: {analysis.totalBlocks}</Text>
+          <Text>Blocos seguros: {analysis.safeBlocks}</Text>
+          <Text>Blocos protegidos: {analysis.unsafeBlocks}</Text>
+
+          <Text style={{ marginTop: 8, color: "#b45309" }}>
+            ⚠️ Bloco 0 e Sector Trailers NÃO serão gravados
+          </Text>
+        </View>
+      )}
+
+      {/* BOTÃO TESTE */}
+      {analysis && (
+        <TouchableOpacity
+          onPress={runTest}
+          disabled={testing}
+          style={{
+            marginTop: 16,
+            padding: 14,
+            backgroundColor: testing ? "#9ca3af" : "#2563eb",
+          }}
+        >
+          <Text style={{ color: "#fff", textAlign: "center" }}>
+            {testing ? "⏳ Aproximar o cartão..." : "🧪 TESTAR CARTÃO (sem gravação)"}
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* RESULTADO DO TESTE */}
+      {testResult && (
+        <View style={{ marginTop: 16, padding: 12, borderWidth: 1 }}>
+          <Text style={{ fontWeight: "bold" }}>
+            🔐 Resultado do Teste
+          </Text>
+
+          <Text style={{ marginTop: 8 }}>
+            Setores OK:{" "}
+            {testResult.sectors.filter(Boolean).length}
+          </Text>
+          <Text>
+            Setores com erro:{" "}
+            {testResult.sectors.filter((s: boolean) => !s).length}
+          </Text>
+
+          <Text style={{ marginTop: 8 }}>
+            Blocos OK:{" "}
+            {
+              testResult.testedBlocks.filter(
+                (b: any) => b.status === "OK"
+              ).length
+            }
+          </Text>
+          <Text>
+            Blocos pulados:{" "}
+            {
+              testResult.testedBlocks.filter(
+                (b: any) => b.status === "SKIPPED"
+              ).length
+            }
+          </Text>
+          <Text>
+            Blocos com erro:{" "}
+            {
+              testResult.testedBlocks.filter(
+                (b: any) => b.status === "ERROR"
+              ).length
+            }
+          </Text>
+
+          <Text style={{ marginTop: 12, fontWeight: "bold" }}>
+            {testResult.testedBlocks.some(
+              (b: any) => b.status === "ERROR"
+            )
+              ? "❌ NÃO É SEGURO GRAVAR AINDA"
+              : "✅ CARTÃO COMPATÍVEL – pode gravar"}
+          </Text>
+        </View>
+      )}
+    </ScrollView>
   );
 }
