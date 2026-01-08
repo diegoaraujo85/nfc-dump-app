@@ -13,3 +13,15 @@ import { twMerge } from "tailwind-merge";
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+export function base64ToHex(base64: string): string {
+  const binary = atob(base64);
+  let hex = "";
+
+  for (let i = 0; i < binary.length; i++) {
+    const byte = binary.charCodeAt(i);
+    hex += byte.toString(16).padStart(2, "0");
+  }
+
+  return hex.toUpperCase();
+}

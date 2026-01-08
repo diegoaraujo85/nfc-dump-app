@@ -59,7 +59,7 @@ export default function HomeScreen() {
           <View className="gap-3">
             {/* Import Dump Button */}
             <TouchableOpacity
-              onPress={() => navigateTo("/(tabs)/import")}
+              onPress={() => navigateTo("/import")}
               className="w-full bg-primary rounded-xl p-4 active:opacity-80"
             >
               <Text className="text-white font-semibold text-center text-lg">

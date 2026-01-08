@@ -43,7 +43,7 @@ export function useNFCDumps() {
           id: Date.now().toString(),
           name,
           data,
-          size: Buffer.byteLength(data, "hex"),
+          size: data.length / 2,
           createdAt: Date.now(),
         };
 

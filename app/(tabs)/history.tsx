@@ -97,7 +97,7 @@ export default function HistoryScreen() {
         {/* Action Buttons */}
         <View className="gap-3 mt-6">
         <TouchableOpacity
-          onPress={() => navigateTo("/(tabs)/import")}
+          onPress={() => navigateTo("/import")}
           className="w-full bg-primary rounded-xl p-4 active:opacity-80"
         >
           <Text className="text-white font-semibold text-center text-lg">

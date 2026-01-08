@@ -10,9 +10,9 @@ import { useRouter } from "expo-router";
 import { ScreenContainer } from "@/components/screen-container";
 import { useNFCDumps } from "@/hooks/use-nfc-dumps";
 import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { base64ToHex, cn } from "@/lib/utils";
 
 export default function ImportScreen() {
   const router = useRouter();
@@ -63,8 +63,7 @@ export default function ImportScreen() {
       });
 
       // Convert base64 to hex
-      const buffer = Buffer.from(content, "base64");
-      const hexData = buffer.toString("hex").toUpperCase();
+      const hexData = base64ToHex(content);
 
       // Save dump
       const dump = await saveDump(selectedFile.name, hexData);

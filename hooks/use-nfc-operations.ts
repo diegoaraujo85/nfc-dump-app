@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import NfcManager, { NfcTech } from "react-native-nfc-manager";
 
+const NFC_AVAILABLE = !!NfcManager;
+
 export interface NFCTag {
   id: string;
   tech: string[];
@@ -23,17 +25,23 @@ export function useNFCOperations() {
   // Initialize NFC Manager
   const initNFC = useCallback(async () => {
     try {
+      if (!NFC_AVAILABLE) {
+        setIsSupported(false);
+        return;
+      }
+
       const supported = await NfcManager.isSupported();
       setIsSupported(supported);
+
       if (supported) {
         await NfcManager.start();
       }
-      return supported;
     } catch (error) {
-      console.error("Error initializing NFC:", error);
-      return false;
+      console.warn("NFC not available in this environment");
+      setIsSupported(false);
     }
   }, []);
+
 
   // Read NFC tag and return raw data
   const readTag = useCallback(
@@ -51,6 +59,10 @@ export function useNFCOperations() {
 
         // Try to read from ISO14443-A tag
         try {
+          if (!NFC_AVAILABLE || !isSupported) {
+            throw new Error("NFC not supported in this environment");
+          }
+          
           await NfcManager.requestTechnology(NfcTech.IsoDep);
           const tag = await NfcManager.getTag();
 
@@ -109,6 +121,10 @@ export function useNFCOperations() {
 
         // Try to write to ISO14443-A tag
         try {
+          if (!NFC_AVAILABLE || !isSupported) {
+            throw new Error("NFC not supported in this environment");
+          }
+
           await NfcManager.requestTechnology(NfcTech.IsoDep);
           await NfcManager.transceive(bytes);
 
