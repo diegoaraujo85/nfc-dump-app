@@ -10,17 +10,22 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { ScreenContainer } from "@/components/screen-container";
 import { useNFCDumps } from "@/hooks/use-nfc-dumps";
 import { useNFCOperations } from "@/hooks/use-nfc-operations";
+import { WriteProtectionStatus } from "@/components/write-protection-status";
 import { useState, useEffect } from "react";
+import type { WriteMode } from "@/lib/nfc-write-protection";
+import React from "react";
 
 export default function WriteScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const { getDumpById, updateDumpStatus } = useNFCDumps();
-  const { writeTag, isWriting, isSupported, cleanup } = useNFCOperations();
-  const [status, setStatus] = useState<"idle" | "waiting" | "writing" | "success" | "error">(
-    "idle"
-  );
+  const { writeTag, isWriting, isSupported, cleanup, writeMode, setWriteMode } =
+    useNFCOperations();
+  const [status, setStatus] = useState<
+    "idle" | "waiting" | "writing" | "success" | "error"
+  >("idle");
   const [message, setMessage] = useState("");
+  const [mode, setMode] = useState<WriteMode>("TEST");
   const dump = getDumpById(id as string);
 
   const navigateTo = (path: string) => {
@@ -55,37 +60,87 @@ export default function WriteScreen() {
       return;
     }
 
+    // Confirmar modo de escrita
+    if (mode === "WRITE") {
+      Alert.alert(
+        "⚠️ Confirmar Escrita Real",
+        "Você está prestes a GRAVAR dados na TAG física. Esta operação é irreversível.\n\nDeseja continuar?",
+        [
+          { text: "Cancelar", style: "cancel" },
+          {
+            text: "Confirmar Escrita",
+            style: "destructive",
+            onPress: () => performWrite(),
+          },
+        ]
+      );
+    } else {
+      performWrite();
+    }
+  };
+
+  const performWrite = async () => {
     try {
       setStatus("waiting");
-      setMessage("Waiting for NFC tag...");
+      setMessage(
+        mode === "TEST" ? "Simulando escrita..." : "Aguardando TAG NFC..."
+      );
 
-      const result = await writeTag(dump.data);
+      const result = await writeTag(dump.data, mode);
 
       if (result.success) {
         setStatus("success");
-        setMessage("Dump written successfully!");
-        await updateDumpStatus(dump.id, "success");
 
-        Alert.alert("Success", "Dump written to tag successfully", [
-          {
-            text: "View History",
-            onPress: () => navigateTo("/(tabs)/history"),
-          },
-          {
-            text: "Back to Home",
-            onPress: () => router.push("/(tabs)"),
-          },
-        ]);
+        if (mode === "TEST") {
+          setMessage("Simulação concluída com sucesso!");
+
+          Alert.alert(
+            "✅ Simulação Concluída",
+            result.message + "\n\nNenhuma TAG foi modificada.",
+            [
+              {
+                text: "Ver Relatório",
+                onPress: () => {
+                  if (result.writeResult) {
+                    const report = result.writeResult.warnings.join("\n");
+                    Alert.alert("Relatório de Simulação", report);
+                  }
+                },
+              },
+              { text: "OK" },
+            ]
+          );
+        } else {
+          setMessage("Escrita concluída e verificada!");
+          await updateDumpStatus(dump.id, "success");
+
+          Alert.alert("✅ Escrita Concluída", result.message, [
+            {
+              text: "Ver Histórico",
+              onPress: () => navigateTo("/(tabs)/history"),
+            },
+            {
+              text: "Voltar",
+              onPress: () => router.push("/(tabs)"),
+            },
+          ]);
+        }
       } else {
         setStatus("error");
         setMessage(result.message);
-        await updateDumpStatus(dump.id, "error");
-        Alert.alert("Error", result.message);
+        if (mode === "WRITE") {
+          await updateDumpStatus(dump.id, "error");
+        }
+        Alert.alert("❌ Erro", result.message);
       }
     } catch (error) {
       setStatus("error");
-      setMessage(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
-      await updateDumpStatus(dump.id, "error");
+      setMessage(
+        `Error: ${error instanceof Error ? error.message : "Unknown error"}`
+      );
+      if (mode === "WRITE") {
+        await updateDumpStatus(dump.id, "error");
+      }
       Alert.alert("Error", "Failed to write dump");
     }
   };
@@ -100,7 +155,7 @@ export default function WriteScreen() {
       case "writing":
         return "bg-warning";
       default:
-        return "bg-primary";
+        return mode === "TEST" ? "bg-warning" : "bg-primary";
     }
   };
 
@@ -114,7 +169,7 @@ export default function WriteScreen() {
       case "writing":
         return "⟳";
       default:
-        return "📱";
+        return mode === "TEST" ? "🧪" : "📱";
     }
   };
 
@@ -124,7 +179,9 @@ export default function WriteScreen() {
         <View className="flex-1 gap-6">
           {/* Header */}
           <View className="items-center gap-2">
-            <Text className="text-3xl font-bold text-foreground">Write Dump to Tag</Text>
+            <Text className="text-3xl font-bold text-foreground">
+              {mode === "TEST" ? "Simular Escrita" : "Escrever na TAG"}
+            </Text>
             <Text className="text-base text-muted">{dump.name}</Text>
           </View>
 
@@ -133,7 +190,9 @@ export default function WriteScreen() {
             <View className="gap-2">
               <View>
                 <Text className="text-xs text-muted">File Name</Text>
-                <Text className="text-lg font-semibold text-foreground">{dump.name}</Text>
+                <Text className="text-lg font-semibold text-foreground">
+                  {dump.name}
+                </Text>
               </View>
               <View>
                 <Text className="text-xs text-muted">Size</Text>
@@ -144,29 +203,62 @@ export default function WriteScreen() {
             </View>
           </View>
 
+          {/* Protection Status */}
+          <WriteProtectionStatus
+            hexData={dump.data}
+            mode={mode}
+            onModeChange={(newMode) => {
+              setMode(newMode);
+              setWriteMode(newMode);
+              setStatus("idle");
+            }}
+          />
+
           {/* Status Display */}
-          <View className={`${getStatusColor()} rounded-xl p-6 items-center gap-3`}>
+          <View
+            className={`${getStatusColor()} rounded-xl p-6 items-center gap-3`}
+          >
             <Text className="text-4xl">{getStatusIcon()}</Text>
             <Text className="text-white font-semibold text-center text-lg">
-              {status === "idle" && "Ready to write"}
-              {status === "waiting" && "Waiting for NFC tag..."}
-              {status === "writing" && "Writing..."}
-              {status === "success" && "Success!"}
-              {status === "error" && "Error"}
+              {status === "idle" &&
+                (mode === "TEST"
+                  ? "Pronto para simular"
+                  : "Pronto para escrever")}
+              {status === "waiting" &&
+                (mode === "TEST" ? "Simulando..." : "Aguardando TAG NFC...")}
+              {status === "writing" && "Escrevendo..."}
+              {status === "success" &&
+                (mode === "TEST" ? "Simulação OK!" : "Sucesso!")}
+              {status === "error" && "Erro"}
             </Text>
             {message && (
-              <Text className="text-white text-center text-sm opacity-90">{message}</Text>
+              <Text className="text-white text-center text-sm opacity-90">
+                {message}
+              </Text>
             )}
           </View>
 
           {/* Instructions */}
           <View className="bg-surface rounded-xl p-4 border border-border">
-            <Text className="text-sm font-semibold text-foreground mb-2">Instructions:</Text>
+            <Text className="text-sm font-semibold text-foreground mb-2">
+              {mode === "TEST" ? "Modo Teste:" : "Instruções:"}
+            </Text>
             <Text className="text-xs text-muted leading-relaxed">
-              1. Tap "Start Writing" button{"\n"}
-              2. Hold your NFC tag near the top of your device{"\n"}
-              3. Keep the tag in place until the write completes{"\n"}
-              4. You'll see a success message when done
+              {mode === "TEST" ? (
+                <>
+                  1. Nenhuma TAG será modificada{"\n"}
+                  2. Apenas simula a operação de escrita{"\n"}
+                  3. Valida o dump antes da escrita real{"\n"}
+                  4. Use para testar antes de gravar
+                </>
+              ) : (
+                <>
+                  1. Toque em "Iniciar Escrita"{"\n"}
+                  2. Aproxime a TAG do topo do dispositivo{"\n"}
+                  3. Mantenha a TAG próxima até concluir{"\n"}
+                  4. Aguarde a mensagem de sucesso
+                </>
+              )}
             </Text>
           </View>
 
@@ -177,13 +269,25 @@ export default function WriteScreen() {
               disabled={isWriting || status === "success"}
               className={`w-full rounded-xl p-4 active:opacity-80 ${
                 isWriting || status === "success" ? "opacity-50" : ""
-              } ${status === "success" ? "bg-success" : "bg-primary"}`}
+              } ${
+                status === "success"
+                  ? "bg-success"
+                  : mode === "TEST"
+                    ? "bg-warning"
+                    : "bg-primary"
+              }`}
             >
               {isWriting ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
                 <Text className="text-white font-semibold text-center text-lg">
-                  {status === "success" ? "✓ Written" : "Start Writing"}
+                  {status === "success"
+                    ? mode === "TEST"
+                      ? "✓ Simulado"
+                      : "✓ Escrito"
+                    : mode === "TEST"
+                      ? "🧪 Iniciar Simulação"
+                      : "🔧 Iniciar Escrita"}
                 </Text>
               )}
             </TouchableOpacity>
@@ -193,7 +297,7 @@ export default function WriteScreen() {
               className="w-full bg-surface border border-border rounded-xl p-4 active:opacity-80"
             >
               <Text className="text-foreground font-semibold text-center text-lg">
-                Back
+                Voltar
               </Text>
             </TouchableOpacity>
           </View>
@@ -201,9 +305,11 @@ export default function WriteScreen() {
           {/* NFC Support Info */}
           {!isSupported && (
             <View className="bg-error bg-opacity-10 rounded-xl p-4 border border-error">
-              <Text className="text-error font-semibold">NFC Not Supported</Text>
+              <Text className="text-error font-semibold">
+                NFC Não Suportado
+              </Text>
               <Text className="text-error text-sm mt-1">
-                This device does not support NFC operations.
+                Este dispositivo não suporta operações NFC.
               </Text>
             </View>
           )}

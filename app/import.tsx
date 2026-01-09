@@ -13,6 +13,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import { useState } from "react";
 import { base64ToHex, cn } from "@/lib/utils";
+import React from "react";
 
 export default function ImportScreen() {
   const router = useRouter();
